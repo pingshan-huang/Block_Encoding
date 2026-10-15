@@ -1,7 +1,7 @@
-# Grouped PMR block encoding - Fig. 5
+# Grouped PMR block encoding
 
 This directory contains a modular Qrisp implementation of the
-grouped block-encoding circuit in Fig. 5 of `PMR_QSVT (3).pdf`.
+grouped block-encoding circuit.
 
 The source files correspond to the circuit primitives:
 
