@@ -13,7 +13,7 @@ The source files correspond to the circuit primitives:
 - `pmr_model.py`: validates and stores the PMR Hamiltonian data.
 - `main.py`: uses Qrisp conjugation and inversion environments to assemble
   `PREP -> r -> R -> r_dagger -> MOVE -> PREP_dagger`.
-- `test_fig5.py`: checks every primitive and the final encoded block.
+- `test.py`: checks every primitive and the final encoded block.
 
 Run the demonstration:
 

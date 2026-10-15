@@ -14,7 +14,7 @@ from r_compute import RComputeBlock
 from value import ValueOracle
 
 
-class Fig5CircuitTests(unittest.TestCase):
+class CircuitTests(unittest.TestCase):
     def setUp(self) -> None:
         self.model = example_model()
         self.value = ValueOracle(self.model)
