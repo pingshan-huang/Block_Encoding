@@ -1,13 +1,25 @@
 @echo off
 setlocal
-set "PROJECT_PYTHON=%~dp0.venv\Scripts\python.exe"
+set "PROJECT_PYTHON=%~dp0..\.venv\Scripts\python.exe"
 
-if not exist "%PROJECT_PYTHON%" (
-    echo Project Python environment not found.
-    echo Create it and install dependencies with:
-    echo   python -m venv .venv
-    echo   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-    exit /b 1
+if exist "%PROJECT_PYTHON%" (
+    "%PROJECT_PYTHON%" "%~dp0main.py" %*
+    exit /b %errorlevel%
 )
 
-"%PROJECT_PYTHON%" "%~dp0main.py" %*
+py -3 -c "import sys" >nul 2>nul
+if not errorlevel 1 (
+    py -3 "%~dp0main.py" %*
+    exit /b %errorlevel%
+)
+
+python -c "import sys" >nul 2>nul
+if not errorlevel 1 (
+    python "%~dp0main.py" %*
+    exit /b %errorlevel%
+)
+
+echo Python was not found.
+echo Install Python 3 and run:
+echo   py -3 -m pip install -r "%~dp0requirements.txt"
+exit /b 1

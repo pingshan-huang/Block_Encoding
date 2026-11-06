@@ -1,11 +1,11 @@
-"""Qrisp PREP block for the grouped PMR circuit."""
+"""Framework-independent PREP block for the grouped PMR circuit."""
 
 from __future__ import annotations
 
 import numpy as np
-from qrisp import QuantumVariable, invert, prepare
 
 from pmr_model import PMRModel
+from state import SparseState, add_amplitude
 
 
 class PrepBlock:
@@ -18,19 +18,6 @@ class PrepBlock:
         state = np.zeros(self.model.move_dim, dtype=np.complex128)
         state[: self.model.move_count] = np.sqrt(self.model.bounds / self.model.alpha)
         return state
-
-    def apply(self, move: QuantumVariable) -> None:
-        """Apply PREP to a Qrisp move register."""
-        if move.size != self.model.move_qubits:
-            raise ValueError(
-                f"PREP expected {self.model.move_qubits} move qubits, got {move.size}"
-            )
-        prepare(move, self.target_state())
-
-    def apply_inverse(self, move: QuantumVariable) -> None:
-        """Apply PREP dagger using Qrisp's inversion environment."""
-        with invert():
-            self.apply(move)
 
     def unitary(self) -> np.ndarray:
         """Return a Householder unitary whose first column is the PREP state."""
@@ -49,3 +36,25 @@ class PrepBlock:
 
     def inverse(self) -> np.ndarray:
         return np.conjugate(self.unitary().T)
+
+    def _apply_gate(self, state: SparseState, gate: np.ndarray) -> SparseState:
+        """Apply a move-register gate to a sparse (f,b,m,x) state."""
+        result: SparseState = {}
+        for (flag, workspace, move, x), amplitude in state.items():
+            for output_move in range(self.model.move_dim):
+                factor = gate[output_move, move]
+                if abs(factor) > 1e-15:
+                    add_amplitude(
+                        result,
+                        (flag, workspace, output_move, x),
+                        factor * amplitude,
+                    )
+        return result
+
+    def apply(self, state: SparseState) -> SparseState:
+        """Apply PREP to the move register."""
+        return self._apply_gate(state, self.unitary())
+
+    def apply_inverse(self, state: SparseState) -> SparseState:
+        """Apply PREP dagger to the move register."""
+        return self._apply_gate(state, self.inverse())
