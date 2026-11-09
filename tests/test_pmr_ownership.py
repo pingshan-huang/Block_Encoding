@@ -22,7 +22,10 @@ from value import ValueOracle
 
 
 class OwnershipTests(unittest.TestCase):
+    """Check that public mutations cannot alter the model or its cached VALUE."""
+
     def fixture(self) -> tuple[PMRModel, ValueOracle]:
+        """Return the complex one-qubit model and cached VALUE used in mutation checks."""
         model = PMRModel.from_coefficients(
             1, (1, 0), [[3 + 4j, 3 - 4j], [2, -2]],
             bounds=[5, 2], shift=0,
@@ -30,6 +33,11 @@ class OwnershipTests(unittest.TestCase):
         return model, ValueOracle(model)
 
     def assert_unchanged(self, model: PMRModel, oracle: ValueOracle) -> None:
+        """Compare the model and VALUE with the fixture's known matrices and values.
+
+        A fresh oracle must also agree with the one cached before a mutation
+        attempt, so changing the model cannot silently leave an old table behind.
+        """
         expected_coefficients = np.array([[3 + 4j, 3 - 4j], [2, -2]])
         expected_hamiltonian = np.array([[2, 3 - 4j], [3 + 4j, -2]])
         expected_value = np.array([[0.6 + 0.8j, 0.6 - 0.8j], [1, -1]])
@@ -59,6 +67,10 @@ class OwnershipTests(unittest.TestCase):
         np.testing.assert_array_equal(ValueOracle(model).table(), oracle.table())
 
     def attempt_array_mutation(self, array: np.ndarray) -> None:
+        """Try enabling writes and changing the array; read-only failures are fine.
+
+        The caller then checks that the attempt did not change the model or VALUE.
+        """
         try:
             array.setflags(write=True)
         except ValueError:
@@ -70,6 +82,7 @@ class OwnershipTests(unittest.TestCase):
             pass
 
     def test_factory_takes_ownership_without_changing_caller_flags(self) -> None:
+        """Keep inputs writable while isolating the model and VALUE from later edits."""
         coefficients = np.array([[3 + 4j, 3 - 4j], [2, -2]])
         bounds = np.array([5.0, 2.0])
         masks = [1, 0]
@@ -85,6 +98,7 @@ class OwnershipTests(unittest.TestCase):
         self.assert_unchanged(model, oracle)
 
     def test_direct_initializer_takes_ownership_of_all_array_arguments(self) -> None:
+        """Direct construction must also isolate arrays, masks, and shift from later edits."""
         coefficients = np.array([[3 + 4j, 3 - 4j], [2, -2]])
         centered = coefficients.copy()
         bounds = np.array([5.0, 2.0])
@@ -103,6 +117,7 @@ class OwnershipTests(unittest.TestCase):
         self.assert_unchanged(model, oracle)
 
     def test_read_only_constructor_inputs_keep_their_original_flags(self) -> None:
+        """Preserve read-only inputs and remain independent if callers later enable writes."""
         for direct in (False, True):
             with self.subTest(direct=direct):
                 coefficients = np.array([[3 + 4j, 3 - 4j], [2, -2]])
@@ -124,6 +139,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assert_unchanged(model, oracle)
 
     def test_strided_constructor_views_do_not_alias_the_model(self) -> None:
+        """Changing the backing arrays of strided input views must not affect the model."""
         for direct in (False, True):
             with self.subTest(direct=direct):
                 coefficient_storage = np.zeros((2, 4), dtype=complex)
@@ -150,6 +166,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assert_unchanged(model, oracle)
 
     def test_exposed_arrays_remain_independent_after_enabling_writes(self) -> None:
+        """Public arrays must not change stored data, even if their write flag can be enabled."""
         model, oracle = self.fixture()
         for name in ("coefficients", "centered_coefficients", "bounds"):
             with self.subTest(name=name):
@@ -157,6 +174,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assert_unchanged(model, oracle)
 
     def test_views_of_exposed_arrays_cannot_change_model_storage(self) -> None:
+        """Writes through public array views must leave the model and cached VALUE intact."""
         model, oracle = self.fixture()
         transforms = {
             "view": lambda array: array.view(),
@@ -173,6 +191,7 @@ class OwnershipTests(unittest.TestCase):
                     self.assert_unchanged(model, oracle)
 
     def test_exposed_array_metadata_changes_cannot_change_model_shapes_or_dtypes(self) -> None:
+        """Changing a returned array's shape or dtype must not alter stored arrays."""
         model, oracle = self.fixture()
         for name in ("coefficients", "centered_coefficients", "bounds"):
             with self.subTest(name=name):
@@ -187,6 +206,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assertEqual(getattr(model, name).dtype, expected_dtype)
 
     def test_returned_matrices_and_normalized_arrays_are_independent(self) -> None:
+        """Editing a reconstructed matrix or normalized table must not change later results."""
         model, oracle = self.fixture()
         for name in ("hamiltonian", "shifted_hamiltonian", "target_block",
                      "normalized_coefficients"):
@@ -196,6 +216,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assert_unchanged(model, oracle)
 
     def test_value_table_and_its_views_cannot_change_the_oracle_cache(self) -> None:
+        """Editing a returned VALUE table, its views, or a scalar must not change the cache."""
         model, oracle = self.fixture()
         for transform in (lambda array: array, lambda array: array.view(),
                           lambda array: array.real, lambda array: array.imag):
@@ -207,6 +228,7 @@ class OwnershipTests(unittest.TestCase):
         self.assert_unchanged(model, oracle)
 
     def test_value_model_access_does_not_expose_writable_model_storage(self) -> None:
+        """Access through VALUE.model must protect stored arrays just like direct access."""
         model, oracle = self.fixture()
         for name in ("coefficients", "centered_coefficients", "bounds"):
             with self.subTest(name=name):
@@ -214,6 +236,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assert_unchanged(model, oracle)
 
     def test_public_model_fields_cannot_be_rebound(self) -> None:
+        """Reject replacement of public model fields so bounds and cached VALUE stay consistent."""
         model, oracle = self.fixture()
         replacements = {
             "n_qubits": 2,
@@ -230,6 +253,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assert_unchanged(model, oracle)
 
     def test_value_model_and_tolerance_cannot_be_rebound(self) -> None:
+        """Reject changes to VALUE's model and tolerance after its table has been cached."""
         model, oracle = self.fixture()
         other_model = PMRModel.from_coefficients(1, (0,), [[1, -1]])
         for name, replacement in (("model", other_model), ("atol", 10)):
@@ -239,6 +263,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assert_unchanged(model, oracle)
 
     def test_dataclass_replace_retains_public_fields_and_owns_replacements(self) -> None:
+        """Keep dataclass replacement usable without sharing mutable inputs with the new model."""
         model, oracle = self.fixture()
         clone = replace(model)
         self.assertIsNot(clone, model)
@@ -265,6 +290,7 @@ class OwnershipTests(unittest.TestCase):
         self.assert_unchanged(model, oracle)
 
     def test_dataclass_asdict_keeps_public_schema_and_returns_independent_arrays(self) -> None:
+        """Keep exported field names stable and protect models from edits to the exported arrays."""
         model, oracle = self.fixture()
         expected_names = ["n_qubits", "masks", "coefficients",
                           "centered_coefficients", "bounds", "shift"]
@@ -281,6 +307,7 @@ class OwnershipTests(unittest.TestCase):
         self.assert_unchanged(reconstructed, reconstructed_oracle)
 
     def test_model_identity_equality_retains_dataclass_behavior(self) -> None:
+        """Keep self-comparison working and report a different object type as unequal."""
         model, _ = self.fixture()
         self.assertIs(model == model, True)
         self.assertIs(model != model, False)

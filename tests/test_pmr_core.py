@@ -24,7 +24,7 @@ from value import ValueOracle
 
 
 class NormalizationTests(unittest.TestCase):
-    """Keep reconstruction, VALUE, and the weighted operator independent."""
+    """Check centering and normalization against explicit matrix and VALUE results."""
 
     def assert_contract(
         self,
@@ -36,6 +36,14 @@ class NormalizationTests(unittest.TestCase):
         *,
         atol: float = 1e-12,
     ) -> ValueOracle:
+        """Check the PMR relationships against independently supplied expectations.
+
+        Reconstruct the weighted operator as sum_mu (b_mu/alpha) P_mu diag(VALUE_mu)
+        and compare it with (expected_H - expected_shift*I)/expected_alpha.
+        Matrix and table comparisons use the supplied atol with rtol=0; shift
+        and alpha are checked to 14 decimal places. Return the VALUE oracle so
+        individual tests can also inspect particular entries.
+        """
         self.assertAlmostEqual(model.shift, expected_shift, places=14)
         self.assertAlmostEqual(model.alpha, expected_alpha, places=14)
         np.testing.assert_allclose(
@@ -76,6 +84,7 @@ class NormalizationTests(unittest.TestCase):
         return value
 
     def test_x_y_z_have_independent_targets_and_values(self) -> None:
+        """Check Pauli X, Y, and Z against their known matrices and VALUE tables."""
         fixtures = (
             (
                 "X", (0, 1), [[0, 0], [1, 1]],
@@ -101,6 +110,7 @@ class NormalizationTests(unittest.TestCase):
                 self.assertEqual(model.masks, masks)
 
     def test_unsorted_masks_keep_the_zero_row_in_place(self) -> None:
+        """Keep masks, bounds, and VALUE rows aligned when the zero row comes last."""
         model = PMRModel.from_coefficients(1, (1, 0), [[1, 1], [0, 0]])
         self.assertEqual(model.masks, (1, 0))
         self.assertEqual(model.move_count, 2)
@@ -111,6 +121,7 @@ class NormalizationTests(unittest.TestCase):
         )
 
     def test_zero_coefficient_row_can_have_positive_preparation_weight(self) -> None:
+        """A zero row may have a positive bound that still counts toward alpha."""
         model = PMRModel.from_coefficients(
             1, (0, 1), [[0, 0], [1, 1]], bounds=[3, 2]
         )
@@ -123,6 +134,7 @@ class NormalizationTests(unittest.TestCase):
         )
 
     def test_inactive_nonzero_mask_is_not_pruned(self) -> None:
+        """Keep a zero-amplitude move in its original row, with zero VALUE."""
         model = PMRModel.from_coefficients(1, (1, 0), [[0, 0], [1, -1]])
         self.assertEqual(model.masks, (1, 0))
         np.testing.assert_array_equal(model.bounds, [0, 1])
@@ -132,6 +144,7 @@ class NormalizationTests(unittest.TestCase):
         )
 
     def test_zero_centered_targets_require_explicit_positive_bounds(self) -> None:
+        """A zero centered target needs an explicit positive normalization bound."""
         for scalar in (0, 1, 3, -2):
             with self.subTest(scalar=scalar):
                 with self.assertRaises(ValueError) as caught:
@@ -149,6 +162,7 @@ class NormalizationTests(unittest.TestCase):
                 np.testing.assert_array_equal(model.bounds / model.alpha, [1])
 
     def test_user_shift_and_bounds_apply_after_centering(self) -> None:
+        """Check supplied bounds against the shifted coefficients, not the input."""
         model = PMRModel.from_coefficients(
             1, (0,), [[5, 1]], shift=2, bounds=[4]
         )
@@ -160,6 +174,10 @@ class NormalizationTests(unittest.TestCase):
             PMRModel.from_coefficients(1, (0,), [[5, 1]], shift=2, bounds=[2])
 
     def test_complex_two_qubit_operator_is_independent(self) -> None:
+        """Check a complex two-qubit example against explicit matrix and VALUE results.
+
+        Automatic and supplied bounds should give the same normalization here.
+        """
         coefficients = [
             [3 + 4j, 3 - 4j, -4 + 3j, -4 - 3j],
             [3, -1, 1, 0],
@@ -186,6 +204,7 @@ class NormalizationTests(unittest.TestCase):
                 self.assert_contract(model, expected_h, 1, 9, expected_v)
 
     def test_existing_example_is_preserved_to_declared_tolerance(self) -> None:
+        """Keep the original one-qubit example correct within the stated tolerance."""
         model = PMRModel.from_coefficients(
             1, (0, 1), [[1.5, -.5], [.3 + .4j, .3 - .4j]]
         )
@@ -195,6 +214,7 @@ class NormalizationTests(unittest.TestCase):
         )
 
     def test_exact_and_loose_bounds_give_distinct_correct_normalizations(self) -> None:
+        """Larger valid bounds should change alpha and VALUE without changing H."""
         h = np.array([[1, 3 - 4j], [3 + 4j, -1]], dtype=complex)
         for bounds, alpha, expected_v in (
             ([1, 5], 6, [[1, -1], [.6 + .8j, .6 - .8j]]),
@@ -208,6 +228,7 @@ class NormalizationTests(unittest.TestCase):
                 self.assert_contract(model, h, 0, alpha, np.array(expected_v))
 
     def test_rounding_does_not_make_a_complex_bound_nonconservative(self) -> None:
+        """A rounded complex magnitude must not let a slightly too-small bound pass."""
         z = .3 + .4j
         squared_magnitude = Fraction.from_float(z.real) ** 2 + Fraction.from_float(z.imag) ** 2
         self.assertGreater(squared_magnitude, Fraction(1, 4))
@@ -219,6 +240,7 @@ class NormalizationTests(unittest.TestCase):
             )
 
     def test_nonzero_rows_cannot_use_zero_or_insufficient_bounds(self) -> None:
+        """Reject bounds that miss tiny coefficients, regardless of Hermiticity atol."""
         for bound in (0, 1e-16):
             for atol in (1e-12, 1e-3):
                 with self.subTest(bound=bound, atol=atol):
@@ -229,6 +251,7 @@ class NormalizationTests(unittest.TestCase):
                         )
 
     def test_tiny_nonzero_values_are_not_hidden_by_matrix_tolerance(self) -> None:
+        """Check tiny coefficients exactly so a loose comparison cannot hide zeros."""
         tiny = 1e-15
         model = PMRModel.from_coefficients(
             1, (0, 1), [[1, -1], [tiny, tiny]], bounds=[1, 1]
@@ -244,6 +267,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertNotEqual(model.target_block()[1, 0], 0)
 
     def test_automatic_bounds_preserve_a_tiny_active_row(self) -> None:
+        """Automatic bounds must keep a tiny nonzero row active through normalization."""
         tiny = 1e-15
         model = PMRModel.from_coefficients(1, (0, 1), [[1, -1], [tiny, tiny]])
         self.assertEqual(model.bounds[1], tiny)
@@ -251,6 +275,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertNotEqual(model.target_block()[1, 0], 0)
 
     def test_subnormal_model_normalizes_without_complex_division_overflow(self) -> None:
+        """Normalize a subnormal diagonal without overflow or runtime warnings."""
         small = 1e-320
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
@@ -263,6 +288,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(value.normalized_value(0, 0), 1)
 
     def test_subnormal_complex_row_has_a_finite_conservative_bound(self) -> None:
+        """Check the bound and normalized values for the smallest complex components."""
         small = np.nextafter(0.0, 1.0)
         z = complex(small, small)
         with warnings.catch_warnings():
@@ -274,12 +300,14 @@ class NormalizationTests(unittest.TestCase):
         np.testing.assert_array_equal(model.target_block(), [[0, .5 - .5j], [.5 + .5j, 0]])
 
     def test_value_normalization_underflow_to_zero_is_rejected(self) -> None:
+        """Reject a row bound that would make a nonzero VALUE component vanish."""
         small = np.nextafter(0.0, 1.0)
         with self.assertRaisesRegex(ValueError, "(?i)(underflow|range)"):
             model = PMRModel.from_coefficients(1, (0, 1), [[0, 0], [small, small]], bounds=[0, 2])
             ValueOracle(model)
 
     def test_total_alpha_normalization_underflow_to_zero_is_rejected(self) -> None:
+        """Reject normalization by alpha when it would erase a nonzero coefficient."""
         small = np.nextafter(0.0, 1.0)
         # c/b remains nonzero and both preparation weights are representable,
         # but division by total alpha=3 would erase the off-diagonal entry.
@@ -288,6 +316,7 @@ class NormalizationTests(unittest.TestCase):
             model.target_block()
 
     def test_positive_zero_row_preparation_weight_underflow_is_rejected(self) -> None:
+        """Do not silently lose a positive preparation weight, even for a zero row."""
         small = np.nextafter(0.0, 1.0)
         # The zero coefficient row is still assigned a positive preparation
         # weight; silently losing that weight would change the declared model.
@@ -295,6 +324,7 @@ class NormalizationTests(unittest.TestCase):
             PMRModel.from_coefficients(1, (0, 1), [[1, -1], [0, 0]], bounds=[2, small])
 
     def test_weighted_value_underflow_is_rejected_even_when_divisions_survive(self) -> None:
+        """Catch underflow in weight times VALUE even when both divisions stay nonzero."""
         small = float(np.nextafter(0.0, 1.0))
         row_bound = .7
         alpha = 1.2 + row_bound
@@ -317,6 +347,7 @@ class NormalizationTests(unittest.TestCase):
                     )
 
     def test_large_valid_bounds_preserve_nonzero_normalized_entries(self) -> None:
+        """Large valid bounds should still produce the expected nonzero VALUE and target."""
         model = PMRModel.from_coefficients(1, (0, 1), [[1, -1], [1, 1]], bounds=[1e307, 1e307])
         value = ValueOracle(model)
         self.assertTrue(np.isfinite(value.table()).all())
@@ -325,6 +356,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertNotEqual(model.target_block()[1, 0], 0)
 
     def test_representable_subnormal_normalized_values_are_supported(self) -> None:
+        """Keep subnormal normalized values when they can still be represented."""
         bound = np.finfo(float).max
         expected = 1 / bound
         self.assertGreater(expected, 0)
@@ -340,24 +372,28 @@ class NormalizationTests(unittest.TestCase):
         self.assertNotEqual(target[0, 0], 0)
 
     def test_nonfinite_coefficients_are_rejected(self) -> None:
+        """Reject NaN and infinite coefficient components before building a model."""
         for bad in (np.nan, np.inf, -np.inf, complex(1, np.inf)):
             with self.subTest(value=bad):
                 with self.assertRaises(ValueError):
                     PMRModel.from_coefficients(1, (0, 1), [[1, -1], [bad, np.conjugate(bad)]])
 
     def test_invalid_shifts_are_rejected_before_casting(self) -> None:
+        """Reject nonfinite or nonreal shifts instead of discarding imaginary parts."""
         for bad in (np.nan, np.inf, -np.inf, .5 + 3j, np.complex128(.5 + 3j)):
             with self.subTest(value=bad):
                 with self.assertRaises(ValueError):
                     PMRModel.from_coefficients(1, (0,), [[1, -1]], shift=bad)
 
     def test_invalid_bounds_are_rejected_before_casting(self) -> None:
+        """Reject negative, nonfinite, or nonreal coefficient bounds."""
         for bad in (np.nan, np.inf, -np.inf, -1, 2 + 3j, np.complex128(2 + 3j)):
             with self.subTest(value=bad):
                 with self.assertRaises(ValueError):
                     PMRModel.from_coefficients(1, (0,), [[1, -1]], bounds=np.array([bad]))
 
     def test_value_tolerance_must_be_finite_nonnegative_and_real(self) -> None:
+        """Reject negative, nonfinite, or nonreal VALUE tolerances."""
         model = PMRModel.from_coefficients(1, (0,), [[1, -1]])
         for bad in (-1e-12, np.nan, np.inf, -np.inf, 1e-12 + 1j, np.complex128(1e-12 + 1j)):
             with self.subTest(atol=bad):
@@ -365,21 +401,25 @@ class NormalizationTests(unittest.TestCase):
                     ValueOracle(model, atol=bad)
 
     def test_total_normalization_overflow_is_rejected(self) -> None:
+        """Finite row bounds are not enough if their sum overflows alpha."""
         with self.assertRaises(ValueError):
             PMRModel.from_coefficients(1, (0, 1), [[1, -1], [1, 1]], bounds=[1e308, 1e308])
 
     def test_centering_overflow_is_rejected(self) -> None:
+        """Reject a finite shift when subtracting it would overflow a coefficient."""
         large = np.finfo(float).max
         with self.assertRaises(ValueError):
             PMRModel.from_coefficients(1, (0,), [[large, -large]], shift=-large)
 
     def test_no_finite_complex_magnitude_bound_is_rejected(self) -> None:
+        """Reject complex coefficients whose magnitude has no finite float bound."""
         large = np.finfo(float).max
         z = complex(large, large)
         with self.assertRaises(ValueError):
             PMRModel.from_coefficients(1, (0, 1), [[0, 0], [z, z.conjugate()]])
 
     def test_constant_extreme_diagonals_center_without_overflow_or_loss(self) -> None:
+        """Center huge and tiny constant diagonals exactly without arithmetic warnings."""
         for scalar in (np.finfo(float).max, np.nextafter(0.0, 1.0)):
             with self.subTest(scalar=scalar):
                 with warnings.catch_warnings():
@@ -391,6 +431,7 @@ class NormalizationTests(unittest.TestCase):
                 np.testing.assert_array_equal(target, np.zeros((2, 2)))
 
     def test_core_imports_do_not_load_quantum_or_sparse_backends(self) -> None:
+        """Importing the mathematical core should not load Qrisp or sparse-backend modules."""
         script = (
             "import sys; sys.path.insert(0, sys.argv[1]); import pmr_model, value; "
             "assert not any(n == 'qrisp' or n.startswith('qrisp.') for n in sys.modules); "
